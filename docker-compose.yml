@@ -1,0 +1,80 @@
+version: '3'  
+services:  
+  zookeeper:  
+    image: wurstmeister/zookeeper:latest  
+    ports:  
+      - "2181:2181"  
+
+  kafka:  
+    image: wurstmeister/kafka:latest  
+    ports:  
+      - "9092:9092"  
+    environment:  
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092  
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181  
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092  
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'  
+      KAFKA_CREATE_TOPICS: "data-topic:1:2,result-topic:1:2"  
+    depends_on:  
+      - zookeeper  
+    healthcheck:  
+      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list" ]  
+      interval: 5s  
+      timeout: 10s  
+      retries: 5  
+
+  inference-service:  
+    build:  
+      context: ./inference_service  
+    depends_on:  
+      - kafka  
+    environment:  
+      LOAD_BALANCER_URL: http://load-balancer 
+
+  data-service:  
+    build:  
+      context: ./data_service  
+    depends_on:  
+      - kafka  
+    ports:  
+      - "3010:3010"  
+
+  db:  
+    image: postgres:13  
+    environment:  
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  
+      POSTGRES_DB: ${POSTGRES_DB}  
+
+  result-service:  
+    build:  
+      context: ./result_service  
+    depends_on:  
+      - kafka  
+      - db  
+    ports:  
+      - "8080:8080"  
+
+  ui-service:  
+    build:  
+      context: ./ui-service  
+    ports:  
+      - "80:3000"  
+
+  load-balancer:  
+    image: nginx:latest  
+    depends_on:  
+      - ai-service  
+    volumes:  
+      - ./nginx.conf:/etc/nginx/nginx.conf  
+
+  ai-service:  
+    build:  
+      context: ./ai_service  
+    deploy:  
+      replicas: 3  
+    healthcheck:  
+      test: ["CMD-SHELL", "curl -f http://localhost:4000/health || exit 1"]  # Adjust if your service endpoint is different  
+      interval: 10s  
+      timeout: 5s  
+      retries: 3  
